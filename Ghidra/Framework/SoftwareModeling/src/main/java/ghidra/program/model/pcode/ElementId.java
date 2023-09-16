@@ -422,5 +422,7 @@ public record ElementId(String name, int id) {
 		new ElementId("command_getuseropname", COMMAND_GETUSEROPNAME);
 
 	public static final ElementId ELEM_SPLITDATATYPE = new ElementId("splitdatatype", 270);
-	public static final ElementId ELEM_UNKNOWN = new ElementId("XMLunknown", 271);
+	public static final ElementId ELEM_JUMPTABLEMAX = new ElementId("jumptablemax", 271);
+	public static final ElementId ELEM_NANIGNORE = new ElementId("nanignore", 272);
+	public static final ElementId ELEM_UNKNOWN = new ElementId("XMLunknown", 273);
 }

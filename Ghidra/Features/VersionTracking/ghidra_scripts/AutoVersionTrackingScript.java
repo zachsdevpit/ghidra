@@ -17,30 +17,40 @@
 // data and and then save the session.
 //@category Examples.Version Tracking
 
-import java.util.Iterator;
-import java.util.List;
-
 import ghidra.app.script.GhidraScript;
 import ghidra.feature.vt.api.db.VTSessionDB;
 import ghidra.feature.vt.api.main.VTSession;
+import ghidra.feature.vt.api.util.VTOptions;
 import ghidra.feature.vt.gui.actions.AutoVersionTrackingTask;
-import ghidra.feature.vt.gui.plugin.*;
+import ghidra.feature.vt.gui.plugin.VTController;
 import ghidra.framework.model.DomainFolder;
-import ghidra.framework.plugintool.Plugin;
+import ghidra.framework.options.ToolOptions;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
 import ghidra.util.task.TaskLauncher;
 
 public class AutoVersionTrackingScript extends GhidraScript {
+
+	private Program sourceProgram;
+	private Program destinationProgram;
+
+	@Override
+	public void cleanup(boolean success) {
+		if (sourceProgram != null && sourceProgram.isUsedBy(this)) {
+			sourceProgram.release(this);
+		}
+		if (destinationProgram != null && destinationProgram.isUsedBy(this)) {
+			destinationProgram.release(this);
+		}
+		super.cleanup(success);
+	}
+
 	@Override
 	public void run() throws Exception {
 
 		DomainFolder folder =
 			askProjectFolder("Please choose a folder for your Version Tracking session.");
 		String name = askString("Please enter a Version Tracking session name", "Session Name");
-
-		Program sourceProgram;
-		Program destinationProgram;
 
 		boolean isCurrentProgramSourceProg = askYesNo("Current Program Source Program?",
 			"Is the current program your source program?");
@@ -54,6 +64,10 @@ public class AutoVersionTrackingScript extends GhidraScript {
 			sourceProgram = askProgram("Please select the source (existing annotated) program");
 		}
 
+		if (sourceProgram == null || destinationProgram == null) {
+			return;
+		}
+
 		// Need to end the script transaction or it interferes with vt things that need locks
 		end(true);
 
@@ -62,33 +76,19 @@ public class AutoVersionTrackingScript extends GhidraScript {
 
 		folder.createFile(name, session, monitor);
 
-		PluginTool tool = state.getTool();
-		VTPlugin vtPlugin = getPlugin(tool, VTPlugin.class);
-		if (vtPlugin == null) {
-			tool.addPlugin(VTPlugin.class.getName());
-			vtPlugin = getPlugin(tool, VTPlugin.class);
-		}
-
-		VTController controller = new VTControllerImpl(vtPlugin);
-
-		//String description = "AutoVTScript";
-
 		AutoVersionTrackingTask autoVtTask =
-			new AutoVersionTrackingTask(controller, session, 1.0, 10.0);
+			new AutoVersionTrackingTask(session, getOptions(), 1.0, 10.0);
 
 		TaskLauncher.launch(autoVtTask);
 	}
 
-	public static <T extends Plugin> T getPlugin(PluginTool tool, Class<T> c) {
-		List<Plugin> list = tool.getManagedPlugins();
-		Iterator<Plugin> it = list.iterator();
-		while (it.hasNext()) {
-			Plugin p = it.next();
-			if (p.getClass() == c) {
-				return c.cast(p);
-			}
+	private ToolOptions getOptions() {
+		ToolOptions vtOptions = new VTOptions("Dummy");
+		PluginTool tool = state.getTool();
+		if (tool != null) {
+			vtOptions = tool.getOptions(VTController.VERSION_TRACKING_OPTIONS_NAME);
 		}
-		return null;
+		return vtOptions;
 	}
 
 }

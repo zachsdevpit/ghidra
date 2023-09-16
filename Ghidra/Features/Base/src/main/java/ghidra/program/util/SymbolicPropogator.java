@@ -20,8 +20,8 @@ import java.util.*;
 
 import org.apache.commons.collections4.map.LRUMap;
 
-import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.cmd.function.CallDepthChangeInfo;
+import ghidra.app.util.PseudoDisassembler;
 import ghidra.pcode.opbehavior.*;
 import ghidra.program.model.address.*;
 import ghidra.program.model.data.*;
@@ -32,7 +32,6 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.scalar.Scalar;
 import ghidra.program.model.symbol.*;
-import ghidra.program.model.util.CodeUnitInsertionException;
 import ghidra.util.BigEndianDataConverter;
 import ghidra.util.Msg;
 import ghidra.util.exception.*;
@@ -63,7 +62,7 @@ public class SymbolicPropogator {
 	protected boolean readExecutableAddress;
 	protected VarnodeContext context;
 
-	protected AddressSet body;             // body of processed instructions
+	protected AddressSet visitedBody;             // body of processed instructions
 	protected boolean hitCodeFlow = false; // no branching so far
 
 	protected boolean debug = false;
@@ -409,7 +408,7 @@ public class SymbolicPropogator {
 	public AddressSet flowConstants(Address fromAddr, Address startAddr, AddressSetView restrictSet,
 			ContextEvaluator eval, VarnodeContext vContext, TaskMonitor monitor)
 			throws CancelledException {
-		body = new AddressSet();
+		visitedBody = new AddressSet();
 		AddressSet conflicts = new AddressSet();
 
 		// prime the context stack with the entry point address
@@ -425,8 +424,8 @@ public class SymbolicPropogator {
 		while (!contextStack.isEmpty()) {
 			monitor.checkCancelled();
 			if (canceled) {
-				body.add(conflicts); // put the conflict/redone addresses back in
-				return body;
+				visitedBody.add(conflicts); // put the conflict/redone addresses back in
+				return visitedBody;
 			}
 
 			// if we run into a flow that has already been done, flow until
@@ -440,7 +439,7 @@ public class SymbolicPropogator {
 			nextFlow.restoreState(vContext);
 
 			// already done it!
-			if (body.contains(nextAddr)) {
+			if (visitedBody.contains(nextAddr)) {
 				// allow it to keep flowing until the next branch/call/ret flow!
 				hitOtherFlow = true;
 				if (!continueAfterHittingFlow) {
@@ -461,7 +460,7 @@ public class SymbolicPropogator {
 				monitor.checkCancelled();
 
 				// already done it!
-				if (body.contains(nextAddr)) {
+				if (visitedBody.contains(nextAddr)) {
 					// allow it to keep flowing until the next branch/call/ret flow!
 					hitOtherFlow = true;
 					if (!continueAfterHittingFlow) {
@@ -499,8 +498,8 @@ public class SymbolicPropogator {
 
 				if (evaluator != null) {
 					if (evaluator.evaluateContextBefore(vContext, instr)) {
-						body.add(conflicts); // put the conflict/redone addresses back in
-						return body;
+						visitedBody.add(conflicts); // put the conflict/redone addresses back in
+						return visitedBody;
 					}
 				}
 
@@ -510,7 +509,7 @@ public class SymbolicPropogator {
 				Address retAddr = applyPcode(vContext, instr, monitor);
 
 				// add this instruction to processed body set
-				body.addRange(minInstrAddress, maxAddr);
+				visitedBody.addRange(minInstrAddress, maxAddr);
 
 				/* Allow evaluateContext routine to change override the flowtype of an instruction.
 				 * Jumps Changed to calls will now continue processing.
@@ -519,8 +518,8 @@ public class SymbolicPropogator {
 				 */
 				if (evaluator != null) {
 					if (evaluator.evaluateContext(vContext, instr)) {
-						body.add(conflicts); // put the conflict/redone addresses back in
-						return body;
+						visitedBody.add(conflicts); // put the conflict/redone addresses back in
+						return visitedBody;
 					}
 				}
 
@@ -533,7 +532,7 @@ public class SymbolicPropogator {
 					}
 				}
 
-				Address inlineCall = null;
+				Address callFlowAddr = null;
 
 				boolean simpleFlow = isSimpleFallThrough(instrFlow);
 				// once we encounter any flow, must set the hitCodeFlow flag
@@ -568,7 +567,7 @@ public class SymbolicPropogator {
 							}
 						}
 						else {
-							inlineCall = flows[0];
+							callFlowAddr = flows[0];
 						}
 					}
 					else if (instrFlow.isComputed() && instrFlow.isCall()) {
@@ -577,12 +576,17 @@ public class SymbolicPropogator {
 					}
 				}
 
-				if (inlineCall != null) {
-					Function func = program.getFunctionManager().getFunctionAt(inlineCall);
+				if (callFlowAddr != null) {
+					Function func = program.getFunctionManager().getFunctionAt(callFlowAddr);
 					if (func != null && func.isInline()) {
-						vContext.mergeToFutureFlowState(maxAddr, inlineCall);
+						vContext.mergeToFutureFlowState(maxAddr, callFlowAddr);
 						vContext.flowEnd(maxAddr);
-						flowConstants(maxAddr, inlineCall, func.getBody(), eval, vContext, monitor);
+						// Body will get re-initialized.
+						// The inlined function may be called multiple times, so body of inlined function
+						// should not be included in the already visited body.
+						AddressSet savedBody = visitedBody;
+						flowConstants(maxAddr, callFlowAddr, func.getBody(), eval, vContext, monitor);
+						visitedBody = savedBody;
 						vContext.mergeToFutureFlowState(minInstrAddress, maxAddr);
 
 						//
@@ -641,8 +645,8 @@ public class SymbolicPropogator {
 			vContext.flowEnd(maxAddr);
 		}
 
-		body.add(conflicts); // put the conflict/redone addresses back in
-		return body;
+		visitedBody.add(conflicts); // put the conflict/redone addresses back in
+		return visitedBody;
 	}
 
 	private boolean isSimpleFallThrough(FlowType instrFlow) {
@@ -665,7 +669,8 @@ public class SymbolicPropogator {
 			else {
 				int instrByteHashCode = -1;
 				try {
-					instrByteHashCode = Arrays.hashCode(instr.getBytes());
+					byte[] bytes = instr.getParsedBytes();
+					instrByteHashCode = Arrays.hashCode(bytes);
 				}
 				catch (MemoryAccessException e) {
 					// this should NEVER happen, should always be able to get the bytes...
@@ -2200,7 +2205,7 @@ public class SymbolicPropogator {
 		for (Reference ref : refs) {
 			Address refAddr = ref.getToAddress();
 			Address addr = refAddr.getAddressSpace().getTruncatedAddress(val, true);
-			if (ref.getReferenceType() == RefType.PARAM  && !body.contains(ref.getFromAddress())) {
+			if (ref.getReferenceType() == RefType.PARAM  && !visitedBody.contains(ref.getFromAddress())) {
 				// if reference address is not in body yet, this is the first time at this location
 				// get rid of the reference, reference could be changed to new AddressSpace or value
 				instr.removeOperandReference(ref.getOperandIndex(), refAddr);
@@ -2615,7 +2620,8 @@ public class SymbolicPropogator {
 			Instruction targetInstr = getInstructionContaining(target);
 			if (targetInstr != null) {
 				// if not at the top of an instruction, don't do it
-				if (!targetInstr.getMinAddress().equals(target)) {
+				Address disassemblyAddress = PseudoDisassembler.getNormalizedDisassemblyAddress(program, target);
+				if (!targetInstr.getMinAddress().equals(disassemblyAddress)) {
 					return false;
 				}
 				if (targetInstr.isInDelaySlot()) {
@@ -2624,7 +2630,7 @@ public class SymbolicPropogator {
 
 				// if not at the top of an instruction flow, don't do it
 				Function func = program.getFunctionManager().getFunctionContaining(target);
-				if (func != null && !func.getEntryPoint().equals(target)) {
+				if (func != null && !func.getEntryPoint().equals(disassemblyAddress)) {
 					return false;
 				}
 			}

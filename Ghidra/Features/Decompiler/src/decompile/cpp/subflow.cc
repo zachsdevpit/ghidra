@@ -1839,7 +1839,7 @@ Datatype *SplitDatatype::getComponent(Datatype *ct,int4 offset,bool &isHole)
 {
   isHole = false;
   Datatype *curType = ct;
-  uintb curOff = offset;
+  int8 curOff = offset;
   do {
     curType = curType->getSubType(curOff,&curOff);
     if (curType == (Datatype *)0) {
@@ -2017,7 +2017,7 @@ bool SplitDatatype::testCopyConstraints(PcodeOp *copyOp)
 
 /// \brief If the given Varnode is an extended precision constant, create split constants
 ///
-/// Look for ZEXT(#c) and CONCAT(#c1,#c2) forms. Try to split into single precision Varnodes.
+/// Look for ZEXT(c) and CONCAT(c1,c2) forms. Try to split into single precision Varnodes.
 /// \param vn is the given Varnode
 /// \param inVarnodes will contain the split constant Varnodes
 /// \return \b true if the Varnode is an extended precision constant and the split is successful
@@ -2085,11 +2085,11 @@ bool SplitDatatype::generateConstants(Varnode *vn,vector<Varnode *> &inVarnodes)
 /// based on the input offsets in \b dataTypePieces.
 /// \param rootVn is the given root constant
 /// \param inVarnodes is the container for the new Varnodes
-void SplitDatatype::buildInConstants(Varnode *rootVn,vector<Varnode *> &inVarnodes)
+/// \param bigEndian is \b true if the output address space is big endian
+void SplitDatatype::buildInConstants(Varnode *rootVn,vector<Varnode *> &inVarnodes,bool bigEndian)
 
 {
   uintb baseVal = rootVn->getOffset();
-  bool bigEndian = rootVn->getSpace()->isBigEndian();
   for(int4 i=0;i<dataTypePieces.size();++i) {
     Datatype *dt = dataTypePieces[i].inType;
     int4 off = dataTypePieces[i].offset;
@@ -2138,7 +2138,7 @@ void SplitDatatype::buildInSubpieces(Varnode *rootVn,PcodeOp *followOp,vector<Va
 /// Extract different pieces from the given root based on the offsets and
 /// output data-types in \b dataTypePieces.
 /// \param rootVn is the given root Varnode
-/// \param inVarnodes is the container for the new Varnodes
+/// \param outVarnodes is the container for the new Varnodes
 void SplitDatatype::buildOutVarnodes(Varnode *rootVn,vector<Varnode *> &outVarnodes)
 
 {
@@ -2234,19 +2234,17 @@ void SplitDatatype::buildPointers(Varnode *rootVn,TypePointer *ptrType,int4 base
   Datatype *baseType = ptrType->getPtrTo();
   for(int4 i=0;i<dataTypePieces.size();++i) {
     Datatype *matchType = isInput ? dataTypePieces[i].inType : dataTypePieces[i].outType;
-    int4 byteOffset = baseOffset + dataTypePieces[i].offset;
+    int8 curOff = baseOffset + dataTypePieces[i].offset;
     Datatype *tmpType = baseType;
-    uintb curOff = byteOffset;
     Varnode *inPtr = rootVn;
     do {
-      uintb newOff;
+      int8 newOff;
       PcodeOp *newOp;
       Datatype *newType;
-      if (curOff >= tmpType->getSize()) {	// An offset bigger than current data-type indicates an array
+      if (curOff < 0 || curOff >= tmpType->getSize()) {	// An offset not within the data-type indicates an array
 	newType = tmpType;			// The new data-type will be the same as current data-type
-	intb sNewOff = (intb)curOff % tmpType->getSize();	// But new offset will be old offset modulo data-type size
-	newOff = (sNewOff < 0) ? (sNewOff + tmpType->getSize()) : sNewOff;
-
+	newOff = curOff % tmpType->getSize();	// But new offset will be old offset modulo data-type size
+	newOff = (newOff < 0) ? (newOff + tmpType->getSize()) : newOff;
       }
       else {
 	newType = tmpType->getSubType(curOff, &newOff);
@@ -2257,7 +2255,7 @@ void SplitDatatype::buildPointers(Varnode *rootVn,TypePointer *ptrType,int4 base
 	}
       }
       if (tmpType == newType || tmpType->getMetatype() == TYPE_ARRAY) {
-	int4 finalOffset = (int4)curOff - (int4)newOff;
+	int8 finalOffset = curOff - newOff;
 	int4 sz = newType->getSize();		// Element size in bytes
 	finalOffset = finalOffset / sz;		// Number of elements
 	sz = AddrSpace::byteToAddressInt(sz, ptrType->getWordSize());
@@ -2271,7 +2269,7 @@ void SplitDatatype::buildPointers(Varnode *rootVn,TypePointer *ptrType,int4 base
 	indexVn->updateType(indexType, false, false);
       }
       else {
-	int4 finalOffset = AddrSpace::byteToAddressInt((int4)curOff - (int4)newOff,ptrType->getWordSize());
+	int8 finalOffset = AddrSpace::byteToAddressInt(curOff - newOff,ptrType->getWordSize());
 	newOp = data.newOp(2,followOp->getAddr());
 	data.opSetOpcode(newOp, CPUI_PTRSUB);
 	data.opSetInput(newOp, inPtr, 0);
@@ -2346,7 +2344,7 @@ bool SplitDatatype::splitCopy(PcodeOp *copyOp,Datatype *inType,Datatype *outType
   vector<Varnode *> inVarnodes;
   vector<Varnode *> outVarnodes;
   if (inVn->isConstant())
-    buildInConstants(inVn,inVarnodes);
+    buildInConstants(inVn,inVarnodes,outVn->getSpace()->isBigEndian());
   else
     buildInSubpieces(inVn,copyOp,inVarnodes);
   buildOutVarnodes(outVn,outVarnodes);
@@ -2461,9 +2459,10 @@ bool SplitDatatype::splitStore(PcodeOp *storeOp,Datatype *outType)
       return false;
   }
 
+  AddrSpace *storeSpace = storeOp->getIn(0)->getSpaceFromConst();
   vector<Varnode *> inVarnodes;
   if (inVn->isConstant())
-    buildInConstants(inVn,inVarnodes);
+    buildInConstants(inVn,inVarnodes,storeSpace->isBigEndian());
   else if (loadOp != (PcodeOp *)0) {
     vector<Varnode *> loadPtrs;
     buildPointers(loadRoot.pointer, loadRoot.ptrType, loadRoot.baseOffset, loadOp, loadPtrs, true);
@@ -2485,7 +2484,6 @@ bool SplitDatatype::splitStore(PcodeOp *storeOp,Datatype *outType)
 
   vector<Varnode *> storePtrs;
   buildPointers(storeRoot.pointer, storeRoot.ptrType, storeRoot.baseOffset, storeOp, storePtrs, false);
-  AddrSpace *storeSpace = storeOp->getIn(0)->getSpaceFromConst();
   // Preserve original STORE object, so that INDIRECT references are still valid
   // but convert it into the first of the smaller STOREs
   data.opSetInput(storeOp,storePtrs[0],1);

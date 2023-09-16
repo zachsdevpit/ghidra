@@ -172,10 +172,13 @@ public:
   int4 max_term_duplication;	///< Max terms duplicated without a new variable
   int4 max_basetype_size;	///< Maximum size of an "integer" type before creating an array type
   int4 min_funcsymbol_size;	///< Minimum size of a function symbol
+  uint4 max_jumptable_size;	///< Maximum number of entries in a single JumpTable
   bool aggressive_ext_trim;	///< Aggressively trim inputs that look like they are sign extended
   bool readonlypropagate;	///< true if readonly values should be treated as constants
   bool infer_pointers;		///< True if we should infer pointers from constants that are likely addresses
   bool analyze_for_loops;	///< True if we should attempt conversion of \e whiledo loops to \e for loops
+  bool nan_ignore_all;		///< True if we should ignore NaN operations, i.e. nan() always returns false
+  bool nan_ignore_compare;	///< True if we should ignore NaN operations protecting floating-point comparisons
   vector<AddrSpace *> inferPtrSpaces;	///< Set of address spaces in which a pointer constant is inferable
   int4 funcptr_align;		///< How many bits of alignment a function ptr has
   uint4 flowoptions;            ///< options passed to flow following engine
@@ -236,7 +239,9 @@ public:
   void decodeFlowOverride(Decoder &decoder);		///< Set flow overrides from XML
   virtual ~Architecture(void);				///< Destructor
 
-  virtual string getDescription(void) const { return archid; }	///< Get a string describing \b this architecture
+  /// \brief Get a string describing \b this architecture
+  /// \return the description
+  virtual string getDescription(void) const { return archid; }
 
   /// \brief Print an error message to console
   ///

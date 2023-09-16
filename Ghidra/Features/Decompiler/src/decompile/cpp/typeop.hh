@@ -53,8 +53,16 @@ protected:
   uint4 addlflags;		///< Additional properties
   string name;			///< Symbol denoting this operation
   OpBehavior *behave;		///< Object for emulating the behavior of the op-code
-  virtual void setMetatypeIn(type_metatype val) {}	///< Set the data-type associated with inputs to this opcode
-  virtual void setMetatypeOut(type_metatype val) {}	///< Set the data-type associated with outputs of this opcode
+
+  /// \brief Set the data-type (as a meta-type) associated with inputs to this opcode
+  ///
+  /// \param val is the data-type of inputs
+  virtual void setMetatypeIn(type_metatype val) {}
+
+  /// \brief Set the data-type (as a meta-type) associated with outputs of this opcode
+  ///
+  /// \param val is the data-type of outputs
+  virtual void setMetatypeOut(type_metatype val) {}
   virtual void setSymbol(const string &nm) { name = nm; }	///< Set the display symbol associated with the op-code
 public:
   TypeOp(TypeFactory *t,OpCode opc,const string &n);	///< Constructor
@@ -745,16 +753,23 @@ public:
 
 /// \brief Information about the PIECE op-code
 class TypeOpPiece : public TypeOpFunc {
+  int4 nearPointerSize;		///< Size of near (truncated) pointer (if not 0)
+  int4 farPointerSize;		///< Size of far (extended) pointer (if not 0)
 public:
   TypeOpPiece(TypeFactory *t);			///< Constructor
   virtual Datatype *getInputCast(const PcodeOp *op,int4 slot,const CastStrategy *castStrategy) const;
   virtual Datatype *getOutputToken(const PcodeOp *op,CastStrategy *castStrategy) const;
+  virtual Datatype *propagateType(Datatype *alttype,PcodeOp *op,Varnode *invn,Varnode *outvn,
+				  int4 inslot,int4 outslot);
   virtual string getOperatorName(const PcodeOp *op) const;
   virtual void push(PrintLanguage *lng,const PcodeOp *op,const PcodeOp *readOp) const { lng->opPiece(op); }
+  static int4 computeByteOffsetForComposite(const PcodeOp *op,int4 slot);
 };
 
 /// \brief Information about the SUBPIECE op-code
 class TypeOpSubpiece : public TypeOpFunc {
+  int4 nearPointerSize;		///< Size of near (truncated) pointer (if not 0)
+  int4 farPointerSize;		///< Size of far (extended) pointer (if not 0)
 public:
   TypeOpSubpiece(TypeFactory *t);			///< Constructor
   virtual Datatype *getInputCast(const PcodeOp *op,int4 slot,const CastStrategy *castStrategy) const;

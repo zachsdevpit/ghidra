@@ -25,12 +25,13 @@ ElementId ELEM_HIGHLIST = ElementId("highlist",117);
 ElementId ELEM_JUMPTABLELIST = ElementId("jumptablelist",118);
 ElementId ELEM_VARNODES = ElementId("varnodes",119);
 
-/// \param nm is the (base) name of the function
+/// \param nm is the (base) name of the function, as a formal symbol
+/// \param disp is the name used when displaying the function name in output
 /// \param scope is Symbol scope associated with the function
 /// \param addr is the entry address for the function
 /// \param sym is the symbol representing the function
 /// \param sz is the number of bytes (of code) in the function body
-Funcdata::Funcdata(const string &nm,Scope *scope,const Address &addr,FunctionSymbol *sym,int4 sz)
+Funcdata::Funcdata(const string &nm,const string &disp,Scope *scope,const Address &addr,FunctionSymbol *sym,int4 sz)
   : baseaddr(addr),
     funcp(),
     vbank(scope->getArch()),
@@ -47,6 +48,7 @@ Funcdata::Funcdata(const string &nm,Scope *scope,const Address &addr,FunctionSym
   glb = scope->getArch();
   minLanedSize = glb->getMinimumLanedRegisterSize();
   name = nm;
+  displayName = disp;
 
   size = sz;
   AddrSpace *stackid = glb->getStackSpace();
@@ -734,9 +736,13 @@ uint8 Funcdata::decode(Decoder &decoder)
       if (decoder.readBool())
 	flags |= no_code;
     }
+    else if (attribId == ATTRIB_LABEL)
+      displayName = decoder.readString();
   }
   if (name.size() == 0)
     throw LowlevelError("Missing function name");
+  if (displayName.size() == 0)
+    displayName = name;
   if (size == -1)
     throw LowlevelError("Missing function size");
   baseaddr = Address::decode( decoder );

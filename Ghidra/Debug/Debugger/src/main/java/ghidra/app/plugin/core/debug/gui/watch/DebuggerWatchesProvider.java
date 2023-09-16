@@ -280,6 +280,9 @@ public class DebuggerWatchesProvider extends ComponentProviderAdapter
 			if (dataType == null) {
 				return null;
 			}
+			if (currentTrace == null) {
+				return dataType;
+			}
 			try (Transaction tx = currentTrace.openTransaction("Resolve DataType")) {
 				return currentTrace.getDataTypeManager().resolve(dataType, null);
 			}
@@ -846,6 +849,9 @@ public class DebuggerWatchesProvider extends ComponentProviderAdapter
 		removeOldListeners();
 		this.currentTrace = trace;
 		addNewListeners();
+		for (WatchRow row : watchTableModel.getModelData()) {
+			row.updateType();
+		}
 	}
 
 	public void coordinatesActivated(DebuggerCoordinates coordinates) {
