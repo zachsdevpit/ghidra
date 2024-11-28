@@ -15,6 +15,7 @@
  */
 package ghidra.pty.windows;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
@@ -30,6 +31,7 @@ import ghidra.pty.PtyChild;
 import ghidra.pty.local.LocalWindowsNativeProcessPtySession;
 import ghidra.pty.windows.jna.ConsoleApiNative;
 import ghidra.pty.windows.jna.ConsoleApiNative.STARTUPINFOEX;
+import ghidra.pty.windows.jna.JobApiNative;
 
 public class ConPtyChild extends ConPtyEndpoint implements PtyChild {
 
@@ -75,12 +77,17 @@ public class ConPtyChild extends ConPtyEndpoint implements PtyChild {
 
 	@Override
 	public LocalWindowsNativeProcessPtySession session(String[] args, Map<String, String> env,
-			Collection<TermMode> mode) throws IOException {
+			File workingDirectory, Collection<TermMode> mode) throws IOException {
 		/**
 		 * TODO: How to incorporate environment into CreateProcess?
 		 * 
 		 * TODO: How to control local echo?
 		 */
+
+		HANDLE hJob = JobApiNative.INSTANCE.CreateJobObjectW(null, null);
+		if (hJob == null) {
+			throw new LastErrorException(Kernel32.INSTANCE.GetLastError());
+		}
 
 		STARTUPINFOEX si = prepareStartupInfo();
 		PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
@@ -91,21 +98,32 @@ public class ConPtyChild extends ConPtyEndpoint implements PtyChild {
 			null /*lpProcessAttributes*/,
 			null /*lpThreadAttributes*/,
 			false /*bInheritHandles*/,
-			ConPty.EXTENDED_STARTUPINFO_PRESENT /*dwCreationFlags*/,
-			null /*lpEnvironment*/,
-			null /*lpCurrentDirectory*/,
+			new DWORD(Kernel32.EXTENDED_STARTUPINFO_PRESENT |
+				Kernel32.CREATE_UNICODE_ENVIRONMENT) /*dwCreationFlags*/,
+			env == null ? null : new WString(ShellUtils.generateEnvBlock(env)),
+			workingDirectory == null ? null
+					: new WString(workingDirectory.getAbsolutePath()) /*lpCurrentDirectory*/,
 			si /*lpStartupInfo*/,
 			pi /*lpProcessInformation*/).booleanValue()) {
 			throw new LastErrorException(Kernel32.INSTANCE.GetLastError());
 		}
 
+		if (!JobApiNative.INSTANCE.AssignProcessToJobObject(hJob, pi.hProcess).booleanValue()) {
+			throw new LastErrorException(Kernel32.INSTANCE.GetLastError());
+		}
+
 		return new LocalWindowsNativeProcessPtySession(pi.dwProcessId.intValue(),
-			pi.dwThreadId.intValue(),
-			new Handle(pi.hProcess), new Handle(pi.hThread));
+			pi.dwThreadId.intValue(), new Handle(pi.hProcess), new Handle(pi.hThread), "ConPTY",
+			new Handle(hJob));
 	}
 
 	@Override
 	public String nullSession(Collection<TermMode> mode) throws IOException {
 		throw new UnsupportedOperationException("ConPTY does not have a name");
+	}
+
+	@Override
+	public void setWindowSize(short cols, short rows) {
+		pseudoConsoleHandle.resize(rows, cols);
 	}
 }

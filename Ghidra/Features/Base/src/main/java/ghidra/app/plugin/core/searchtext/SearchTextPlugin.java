@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,7 +31,6 @@ import docking.tool.ToolConstants;
 import docking.widgets.fieldpanel.support.Highlight;
 import docking.widgets.table.threaded.*;
 import generic.theme.GIcon;
-import ghidra.GhidraOptions;
 import ghidra.app.CorePluginPackage;
 import ghidra.app.context.*;
 import ghidra.app.nav.Navigatable;
@@ -376,37 +375,38 @@ public class SearchTextPlugin extends ProgramPlugin implements OptionsChangeList
 	 * Create the action for to pop up the search dialog.
 	 */
 	private void createActions() {
-		String subGroup = getClass().getName();
+		String subGroup = "d"; // Memory Search uses groups 'a', 'b', and 'c'
 
+		//@formatter:off
 		new ActionBuilder("Search Text", getName())
-			.menuPath("&Search", "Program &Text...")
-			.menuGroup("search", subGroup)
-			.keyBinding("ctrl shift E")
-			.description(DESCRIPTION)
-			.helpLocation(new HelpLocation(HelpTopics.SEARCH, "Search Text"))
-			.withContext(NavigatableActionContext.class, true)
-			.validContextWhen(c -> !(c instanceof RestrictedAddressSetContext))
-			.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
-			.onAction(c -> {
-				setNavigatable(c.getNavigatable());
-				displayDialog(c);
-			})
-			.buildAndInstall(tool);
+				.menuPath("&Search", "Program &Text...")
+				.menuGroup("search", subGroup)
+				.keyBinding("ctrl shift E")
+				.description(DESCRIPTION)
+				.helpLocation(new HelpLocation(HelpTopics.SEARCH, "Search Text"))
+				.withContext(NavigatableActionContext.class, true)
+				.validContextWhen(c -> !(c instanceof RestrictedAddressSetContext))
+				.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
+				.onAction(c -> {
+					setNavigatable(c.getNavigatable());
+					displayDialog(c);
+				})
+				.buildAndInstall(tool);
 
 		new ActionBuilder("Repeat Text Search", getName())
-			.menuPath("&Search", "Repeat Text Search")
-			.menuGroup("search", subGroup)
-			.keyBinding("ctrl shift F3")
-			.description(DESCRIPTION)
-			.helpLocation(new HelpLocation(HelpTopics.SEARCH, "Repeat Text Search"))
-			.withContext(NavigatableActionContext.class, true)
-			.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
-			.enabledWhen(c -> searchedOnce)
-			.onAction(c -> {
-				setNavigatable(c.getNavigatable());
-				searchDialog.repeatSearch();
-			})
-			.buildAndInstall(tool);
+				.menuPath("&Search", "Repeat Text Search")
+				.menuGroup("search", subGroup)
+				.description(DESCRIPTION)
+				.helpLocation(new HelpLocation(HelpTopics.SEARCH, "Repeat Text Search"))
+				.withContext(NavigatableActionContext.class, true)
+				.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
+				.enabledWhen(c -> searchedOnce)
+				.onAction(c -> {
+					setNavigatable(c.getNavigatable());
+					searchDialog.repeatSearch();
+				})
+				.buildAndInstall(tool);
+		//@formatter:on
 	}
 
 	protected void updateNavigatable(ActionContext context) {
@@ -423,7 +423,7 @@ public class SearchTextPlugin extends ProgramPlugin implements OptionsChangeList
 	@Override
 	public void optionsChanged(ToolOptions options, String optionName, Object oldValue,
 			Object newValue) {
-		if (optionName.equals(GhidraOptions.OPTION_SEARCH_LIMIT)) {
+		if (optionName.equals(SearchConstants.SEARCH_LIMIT_NAME)) {
 			int newSearchLimit = ((Integer) newValue).intValue();
 			if (newSearchLimit <= 0) {
 				throw new OptionsVetoException("Search limit must be greater than 0");
@@ -450,7 +450,7 @@ public class SearchTextPlugin extends ProgramPlugin implements OptionsChangeList
 			"The search result highlight color for the currently selected match");
 
 		searchLimit =
-			opt.getInt(GhidraOptions.OPTION_SEARCH_LIMIT, SearchConstants.DEFAULT_SEARCH_LIMIT);
+			opt.getInt(SearchConstants.SEARCH_LIMIT_NAME, SearchConstants.DEFAULT_SEARCH_LIMIT);
 
 		doHighlight = opt.getBoolean(SearchConstants.SEARCH_HIGHLIGHT_NAME, true);
 

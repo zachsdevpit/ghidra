@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -110,6 +110,22 @@ public class MultipleKeyAction extends DockingKeyBindingAction {
 	}
 
 	@Override
+	public List<DockingActionIf> getValidActions(Object source) {
+
+		if (ignoreActionWhileMenuShowing()) {
+			return List.of();
+		}
+
+		List<DockingActionIf> validActions = new ArrayList<>();
+		List<ExecutableAction> proxyActions = getActionsForCurrentOrDefaultContext(source);
+		for (ExecutableAction proxy : proxyActions) {
+			DockingActionIf action = proxy.getAction();
+			validActions.add(action);
+		}
+		return validActions;
+	}
+
+	@Override
 	public void actionPerformed(final ActionEvent event) {
 		// Build list of actions which are valid in current context
 		List<ExecutableAction> list = getActionsForCurrentOrDefaultContext(event.getSource());
@@ -142,8 +158,8 @@ public class MultipleKeyAction extends DockingKeyBindingAction {
 	}
 
 	private boolean ignoreActionWhileMenuShowing() {
-		if (getKeyBindingPrecedence() == KeyBindingPrecedence.ReservedActionsLevel) {
-			return false; // allow reserved bindings through "no matter what!"
+		if (getKeyBindingPrecedence() == KeyBindingPrecedence.SystemActionsLevel) {
+			return false; // allow system bindings through "no matter what!"
 		}
 
 		MenuSelectionManager menuManager = MenuSelectionManager.defaultManager();
@@ -238,8 +254,8 @@ public class MultipleKeyAction extends DockingKeyBindingAction {
 	}
 
 	@Override
-	public boolean isReservedKeybindingPrecedence() {
-		return false; // MultipleKeyActions can never be reserved 
+	public boolean isSystemKeybindingPrecedence() {
+		return false; // MultipleKeyActions can never be 'system' 
 	}
 
 	@Override

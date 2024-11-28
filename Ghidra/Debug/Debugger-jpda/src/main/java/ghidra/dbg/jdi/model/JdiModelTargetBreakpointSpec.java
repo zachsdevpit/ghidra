@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,8 @@
  */
 package ghidra.dbg.jdi.model;
 
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import ghidra.dbg.DebuggerObjectModel.RefreshBehavior;
@@ -26,7 +27,6 @@ import ghidra.dbg.target.TargetBreakpointSpec;
 import ghidra.dbg.target.TargetBreakpointSpecContainer.TargetBreakpointKindSet;
 import ghidra.dbg.target.schema.TargetAttributeType;
 import ghidra.dbg.target.schema.TargetObjectSchemaInfo;
-import ghidra.util.datastruct.ListenerMap.ListenerEntry;
 import ghidra.util.datastruct.ListenerSet;
 
 @TargetObjectSchemaInfo(
@@ -38,8 +38,7 @@ import ghidra.util.datastruct.ListenerSet;
 		@TargetAttributeType(
 			name = TargetBreakpointLocation.SPEC_ATTRIBUTE_NAME,
 			type = JdiModelTargetBreakpointSpec.class),
-		@TargetAttributeType(type = Void.class)
-	},
+		@TargetAttributeType(type = Void.class) },
 	canonicalContainer = true)
 public class JdiModelTargetBreakpointSpec extends JdiModelTargetObjectImpl
 		implements TargetBreakpointSpec, JdiModelTargetDeletable {
@@ -48,12 +47,7 @@ public class JdiModelTargetBreakpointSpec extends JdiModelTargetObjectImpl
 	protected TargetBreakpointKindSet kinds;
 
 	protected final ListenerSet<TargetBreakpointAction> actions =
-		new ListenerSet<>(TargetBreakpointAction.class) {
-			// Use strong references on actions
-			protected Map<TargetBreakpointAction, ListenerEntry<? extends TargetBreakpointAction>> createMap() {
-				return new LinkedHashMap<>();
-			}
-		};
+		new ListenerSet<>(TargetBreakpointAction.class, false);
 
 	public JdiModelTargetBreakpointSpec(JdiModelTargetBreakpointContainer breakpoints,
 			JdiBreakpointInfo info, boolean isElement) {

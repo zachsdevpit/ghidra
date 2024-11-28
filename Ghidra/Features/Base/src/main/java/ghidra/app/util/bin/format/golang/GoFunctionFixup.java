@@ -18,8 +18,9 @@ package ghidra.app.util.bin.format.golang;
 import java.util.ArrayList;
 import java.util.List;
 
-import ghidra.app.plugin.core.analysis.GolangSymbolAnalyzer;
-import ghidra.app.util.bin.format.dwarf4.DWARFUtil;
+import ghidra.app.util.bin.format.dwarf.DWARFUtil;
+import ghidra.app.util.bin.format.golang.rtti.GoRttiMapper;
+import ghidra.app.util.bin.format.golang.structmapping.MarkupSession;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.lang.Register;
@@ -27,7 +28,6 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.listing.Function.FunctionUpdateType;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.*;
-import ghidra.util.Msg;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
 
@@ -91,10 +91,9 @@ public class GoFunctionFixup {
 				spillVars.add(newParam);
 				if (dt instanceof Structure &&
 					newParam.getVariableStorage().size() != dt.getLength()) {
-					Msg.warn(GoFunctionFixup.class,
-						"Known storage allocation problem: func %s@%s param %s register allocation for structs missing inter-field padding."
-								.formatted(func.getName(), func.getEntryPoint(),
-									newParam.toString()));
+					MarkupSession.logWarningAt(program, func.getEntryPoint(),
+						"Known storage allocation problem: param %s register allocation for structs missing inter-field padding."
+								.formatted(newParam.toString()));
 				}
 			}
 			else {
@@ -121,8 +120,15 @@ public class GoFunctionFixup {
 		}
 
 		// Update the function in Ghidra
-		func.updateFunction(null, returnParam, newParams, FunctionUpdateType.CUSTOM_STORAGE, true,
-			SourceType.USER_DEFINED);
+		try {
+			func.updateFunction(null, returnParam, newParams, FunctionUpdateType.CUSTOM_STORAGE,
+				true, SourceType.USER_DEFINED);
+		}
+		catch (DuplicateNameException | InvalidInputException e) {
+			MarkupSession.logWarningAt(program, func.getEntryPoint(),
+				"Failed to update function signature: " + e.getMessage());
+			return;
+		}
 
 		// Remove any old local vars that are in the callers stack instead of in the local stack area
 		for (Variable localVar : func.getLocalVariables()) {
@@ -144,7 +150,7 @@ public class GoFunctionFixup {
 					paramDT.getLength());
 			VariableStorage varStorage = new VariableStorage(program, List.of(stackVarnode));
 			LocalVariableImpl localVar =
-				new LocalVariableImpl(param.getName() + "-spill", 0, paramDT, varStorage, program);
+				new LocalVariableImpl(param.getName() + "_spill", 0, paramDT, varStorage, program);
 
 			// TODO: needs more thought
 			func.addLocalVariable(localVar, SourceType.USER_DEFINED);
@@ -191,14 +197,12 @@ public class GoFunctionFixup {
 			long stackOffset = storageAllocator.getStackAllocation(dt);
 			return new ParameterImpl(oldParam.getName(), dt, (int) stackOffset, program);
 		}
-		else {
-			if (DWARFUtil.isEmptyArray(dt)) {
-				dt = makeEmptyArrayDataType(dt);
-			}
-			Address zerobaseAddress = GolangSymbolAnalyzer.getZerobaseAddress(program);
-			return new ParameterImpl(oldParam.getName(), dt, zerobaseAddress, program,
-				SourceType.USER_DEFINED);
+		if (DWARFUtil.isEmptyArray(dt)) {
+			dt = makeEmptyArrayDataType(dt);
 		}
+		Address zerobaseAddress = GoRttiMapper.getZerobaseAddress(program);
+		return new ParameterImpl(oldParam.getName(), dt, zerobaseAddress, program,
+			SourceType.USER_DEFINED);
 
 	}
 
@@ -214,10 +218,6 @@ public class GoFunctionFixup {
 		if (returnDT == null || Undefined.isUndefined(returnDT) || DWARFUtil.isVoid(returnDT)) {
 			return null;
 		}
-
-//		status refactoring return result storage calc to use new GoFunctionMultiReturn
-//		class to embed ordinal order in data type so that original data type and calc info
-//		can be recreated.
 		
 		GoFunctionMultiReturn multiReturn;
 		if ((multiReturn =
@@ -229,12 +229,12 @@ public class GoFunctionFixup {
 			returnDT = multiReturn.getStruct();
 
 			for (DataTypeComponent dtc : multiReturn.getNormalStorageComponents()) {
-				allocateReturnStorage(program, dtc.getFieldName() + "-return-result-alias",
+				allocateReturnStorage(program, dtc.getFieldName() + "_return_result_alias",
 					dtc.getDataType(), storageAllocator, varnodes, returnResultAliasVars,
 					false);
 			}
 			for (DataTypeComponent dtc : multiReturn.getStackStorageComponents()) {
-				allocateReturnStorage(program, dtc.getFieldName() + "-return-result-alias",
+				allocateReturnStorage(program, dtc.getFieldName() + "_return_result_alias",
 					dtc.getDataType(), storageAllocator, varnodes, returnResultAliasVars,
 					false);
 			}
@@ -246,10 +246,10 @@ public class GoFunctionFixup {
 			if (DWARFUtil.isEmptyArray(returnDT)) {
 				returnDT = makeEmptyArrayDataType(returnDT);
 			}
-			varnodes.add(new Varnode(GolangSymbolAnalyzer.getZerobaseAddress(program), 1));
+			varnodes.add(new Varnode(GoRttiMapper.getZerobaseAddress(program), 1));
 		}
 		else {
-			allocateReturnStorage(program, "return-value-alias-variable", returnDT,
+			allocateReturnStorage(program, "return_value_alias_variable", returnDT,
 				storageAllocator, varnodes, returnResultAliasVars, true);
 		}
 
@@ -273,9 +273,20 @@ public class GoFunctionFixup {
 		else {
 			if (!DWARFUtil.isZeroByteDataType(dt)) {
 				long stackOffset = storageAllocator.getStackAllocation(dt);
-				varnodes.add(
-					new Varnode(program.getAddressFactory().getStackSpace().getAddress(stackOffset),
+				Varnode prev = !varnodes.isEmpty() ? varnodes.get(varnodes.size() - 1) : null;
+				if (prev != null && prev.getAddress().isStackAddress()) {
+//					if ( prev.getAddress().getOffset() + prev.getSize() != stackOffset ) {
+//						throw new InvalidInputException("Non-adjacent stack storage");
+//					}
+					Varnode updatedVN =
+						new Varnode(prev.getAddress(), prev.getSize() + dt.getLength());
+					varnodes.set(varnodes.size() - 1, updatedVN);
+				}
+				else {
+					varnodes.add(new Varnode(
+						program.getAddressFactory().getStackSpace().getAddress(stackOffset),
 						dt.getLength()));
+				}
 
 				// when the return value is on the stack, the decompiler's output is improved
 				// when the function has something at the stack location
@@ -289,7 +300,8 @@ public class GoFunctionFixup {
 	public static boolean isGolangAbi0Func(Function func) {
 		Address funcAddr = func.getEntryPoint();
 		for (Symbol symbol : func.getProgram().getSymbolTable().getSymbolsAsIterator(funcAddr)) {
-			if (symbol.getSymbolType() == SymbolType.LABEL) {
+			if (symbol.getSymbolType() == SymbolType.LABEL ||
+				symbol.getSymbolType() == SymbolType.FUNCTION) {
 				String labelName = symbol.getName();
 				if (labelName.endsWith("abi0")) {
 					return true;

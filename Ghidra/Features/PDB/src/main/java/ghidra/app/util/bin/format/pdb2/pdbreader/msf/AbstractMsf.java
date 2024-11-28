@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,12 +19,13 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Objects;
 
+import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.bin.format.pdb2.pdbreader.*;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
 /**
- * This class represents the the Multi-Stream Format File used for Windows PDB files.
+ * This class represents the Multi-Stream Format File used for Windows PDB files.
  *  We have intended to implement to the Microsoft PDB API (source); see the API for truth.
  *  <P>
  *  Derived classes represents the real formats.  The file format represents a kind of
@@ -134,18 +135,16 @@ public abstract class AbstractMsf implements Msf {
 	//==============================================================================================
 	/**
 	 * Constructor
-	 * @param file the {@link RandomAccessFile} to process for this class
-	 * @param filename name of {@code #file}
+	 * @param byteProvider the ByteProvider providing bytes for the MSF
 	 * @param monitor the TaskMonitor
 	 * @param pdbOptions {@link PdbReaderOptions} used for processing the PDB
 	 * @throws IOException upon file IO seek/read issues
 	 * @throws PdbException upon unknown value for configuration
 	 */
-	public AbstractMsf(RandomAccessFile file, String filename, TaskMonitor monitor,
-			PdbReaderOptions pdbOptions)
+	public AbstractMsf(ByteProvider byteProvider, TaskMonitor monitor, PdbReaderOptions pdbOptions)
 			throws IOException, PdbException {
-		Objects.requireNonNull(file, "file may not be null");
-		this.filename = Objects.requireNonNull(filename, "filename may not be null");
+		Objects.requireNonNull(byteProvider, "ByteProvider may not be null");
+		this.filename = byteProvider.getAbsolutePath();
 		this.monitor = TaskMonitor.dummyIfNull(monitor);
 		this.pdbOptions = Objects.requireNonNull(pdbOptions, "PdbOptions may not be null");
 		// Do initial configuration with largest possible page size.  ConfigureParameters will
@@ -159,7 +158,7 @@ public abstract class AbstractMsf implements Msf {
 		pageSize = 0x1000;
 		configureParameters();
 		// Create components.
-		fileReader = new MsfFileReader(this, file);
+		fileReader = new MsfFileReader(this, byteProvider);
 		create();
 	}
 
@@ -239,6 +238,26 @@ public abstract class AbstractMsf implements Msf {
 		}
 	}
 
+	/**
+	 * Developer mechanism to locate stream and offset within the stream that contains the
+	 * absolute file offset
+	 * @param fileOffset the absolute file offset that we are trying to locate
+	 * @return the offset in the stream of the file offset or {@code null} if not in the stream
+	 */
+	public StreamAndOffset getStreamOffsetForAbsoluteFileOffset(long fileOffset) {
+		if (fileOffset < 0L || fileOffset > (long) numPages * pageSize) {
+			return null;
+		}
+		for (int number = 0; number < streamTable.getNumStreams(); number++) {
+			MsfStream s = getStream(number);
+			Integer offset = s.getStreamOffsetForAbsoluteFileOffset(fileOffset);
+			if (offset != null) {
+				return new StreamAndOffset(number, offset);
+			}
+		}
+		return null;
+	}
+
 	//==============================================================================================
 	// Class Internals
 	//==============================================================================================
@@ -252,8 +271,8 @@ public abstract class AbstractMsf implements Msf {
 	}
 
 	/**
-	 * Returns the the mask used for masking off the upper bits of a value use to get the
-	 *  mod-page-size of the value (pageSizes must be power of two for this to work)
+	 * Returns the mask used for masking off the upper bits of a value used to get the
+	 *  mod-page-size of the value (pageSizes must be a power of two for this to work)
 	 * @return the mask
 	 */
 	@Override
@@ -320,8 +339,7 @@ public abstract class AbstractMsf implements Msf {
 	 * @throws CancelledException upon user cancellation
 	 */
 	@Override
-	public void deserialize()
-			throws IOException, PdbException, CancelledException {
+	public void deserialize() throws IOException, PdbException, CancelledException {
 		byte[] bytes = new byte[getPageSize()];
 		fileReader.read(getHeaderPageNumber(), 0, getPageSize(), bytes, 0);
 

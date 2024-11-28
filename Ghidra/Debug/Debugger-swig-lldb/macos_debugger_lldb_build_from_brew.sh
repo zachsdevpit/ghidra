@@ -14,6 +14,14 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 ##
+
+######################################################################################
+## PLEASE NOTE: This version of the lldb-based debugger is being deprecated.        ##
+##   Please try the Python-based traceRMI versions documented in the Debugger help. ##
+######################################################################################
+
+
+##
 # This script will download lldb from homebrew and
 # build the Ghidra JNI bindings for this version of
 # lldb. It will then patch your Ghidra distribution
@@ -43,7 +51,7 @@ LLVM_TEMP_DIR=$(mktemp -d)
 # brew specific patches.
 brew unpack --patch --destdir ${LLVM_TEMP_DIR} llvm@${LLVM_VERSION}
 export LLVM_HOME="$(echo ${LLVM_TEMP_DIR}/llvm@${LLVM_VERSION}-*)"
-if [ -z "${LLVM_HOME}" ]; then
+if [ ! -d "${LLVM_HOME}" ]; then
 	export LLVM_HOME="$(echo ${LLVM_TEMP_DIR}/llvm-${LLVM_VERSION}.*)"
 fi
 

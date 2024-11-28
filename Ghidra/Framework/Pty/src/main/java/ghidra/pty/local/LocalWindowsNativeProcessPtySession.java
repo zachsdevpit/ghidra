@@ -15,6 +15,9 @@
  */
 package ghidra.pty.local;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
 import com.sun.jna.LastErrorException;
 import com.sun.jna.platform.win32.Kernel32;
 import com.sun.jna.platform.win32.WinBase;
@@ -22,28 +25,32 @@ import com.sun.jna.ptr.IntByReference;
 
 import ghidra.pty.PtySession;
 import ghidra.pty.windows.Handle;
+import ghidra.pty.windows.jna.JobApiNative;
 import ghidra.util.Msg;
 
 public class LocalWindowsNativeProcessPtySession implements PtySession {
-	//private final int pid;
+	private final int pid;
 	//private final int tid;
 	private final Handle processHandle;
 	//private final Handle threadHandle;
+	private final String ptyName;
+	private final Handle jobHandle;
 
 	public LocalWindowsNativeProcessPtySession(int pid, int tid, Handle processHandle,
-			Handle threadHandle) {
-		//this.pid = pid;
+			Handle threadHandle, String ptyName, Handle jobHandle) {
+		this.pid = pid;
 		//this.tid = tid;
 		this.processHandle = processHandle;
 		//this.threadHandle = threadHandle;
+		this.ptyName = ptyName;
+		this.jobHandle = jobHandle;
 
 		Msg.info(this, "local Windows Pty session. PID = " + pid);
 	}
 
-	@Override
-	public int waitExited() throws InterruptedException {
+	protected int doWaitExited(int millis) throws TimeoutException {
 		while (true) {
-			switch (Kernel32.INSTANCE.WaitForSingleObject(processHandle.getNative(), -1)) {
+			switch (Kernel32.INSTANCE.WaitForSingleObject(processHandle.getNative(), millis)) {
 				case Kernel32.WAIT_OBJECT_0:
 				case Kernel32.WAIT_ABANDONED:
 					IntByReference lpExitCode = new IntByReference();
@@ -52,7 +59,7 @@ public class LocalWindowsNativeProcessPtySession implements PtySession {
 						return lpExitCode.getValue();
 					}
 				case Kernel32.WAIT_TIMEOUT:
-					throw new AssertionError();
+					throw new TimeoutException();
 				case Kernel32.WAIT_FAILED:
 					throw new LastErrorException(Kernel32.INSTANCE.GetLastError());
 			}
@@ -60,18 +67,33 @@ public class LocalWindowsNativeProcessPtySession implements PtySession {
 	}
 
 	@Override
-	public void destroyForcibly() {
-		if (!Kernel32.INSTANCE.TerminateProcess(processHandle.getNative(), 1)) {
-			int error = Kernel32.INSTANCE.GetLastError();
-			switch (error) {
-				case Kernel32.ERROR_ACCESS_DENIED:
-					/**
-					 * This indicates the process has already terminated. It's unclear to me whether
-					 * or not that is the only possible cause of this error.
-					 */
-					return;
-			}
-			throw new LastErrorException(error);
+	public int waitExited() {
+		try {
+			return doWaitExited(-1);
 		}
+		catch (TimeoutException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	@Override
+	public int waitExited(long timeout, TimeUnit unit) throws TimeoutException {
+		long millis = TimeUnit.MILLISECONDS.convert(timeout, unit);
+		if (millis > Integer.MAX_VALUE) {
+			throw new IllegalArgumentException("Too long a timeout");
+		}
+		return doWaitExited((int) millis);
+	}
+
+	@Override
+	public void destroyForcibly() {
+		if (!JobApiNative.INSTANCE.TerminateJobObject(jobHandle.getNative(), 1).booleanValue()) {
+			throw new LastErrorException(Kernel32.INSTANCE.GetLastError());
+		}
+	}
+
+	@Override
+	public String description() {
+		return "process " + pid + " on " + ptyName;
 	}
 }

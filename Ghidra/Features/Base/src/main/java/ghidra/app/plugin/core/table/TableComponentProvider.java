@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,6 +20,7 @@ import java.awt.Color;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import javax.swing.*;
 import javax.swing.event.TableModelEvent;
@@ -30,7 +31,6 @@ import docking.action.DockingAction;
 import docking.action.MenuData;
 import docking.widgets.table.AbstractSortedTableModel;
 import docking.widgets.table.GTable;
-import docking.widgets.table.threaded.GThreadedTablePanel;
 import generic.theme.GIcon;
 import ghidra.app.nav.Navigatable;
 import ghidra.app.nav.NavigatableRemovalListener;
@@ -45,6 +45,8 @@ import ghidra.util.HelpLocation;
 import ghidra.util.table.*;
 import ghidra.util.table.actions.DeleteTableRowAction;
 import ghidra.util.table.actions.MakeProgramSelectionAction;
+import utility.function.Callback;
+import utility.function.Dummy;
 
 public class TableComponentProvider<T> extends ComponentProviderAdapter
 		implements TableModelListener, NavigatableRemovalListener {
@@ -60,11 +62,15 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 	private String programName;
 	private String windowSubMenu;
 	private List<ComponentProviderActivationListener> activationListenerList = new ArrayList<>();
+	private Callback closedCallback = Dummy.callback();
 
 	private Navigatable navigatable;
 	private SelectionNavigationAction selectionNavigationAction;
 	private DockingAction selectAction;
 	private DockingAction removeItemsAction;
+	private DockingAction externalGotoAction;
+
+	private Function<MouseEvent, ActionContext> contextProvider = null;
 
 	private HelpLocation helpLoc = new HelpLocation(HelpTopics.SEARCH, "Query_Results");
 
@@ -132,8 +138,8 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 
 		if (navigatable != null) {
 			// Only allow global actions if we are derived from the connect/primary navigatable.  
-			// This allows the the primary navigatable to process key events without the user having
-			// to focus first focus the primary navigatable.
+			// This allows the primary navigatable to process key events without the user having
+			// to first focus the primary navigatable.
 			table.setActionsEnabled(navigatable.isConnected());
 			navigatable.addNavigatableListener(this);
 			table.installNavigation(tool, navigatable);
@@ -159,8 +165,7 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 				new MakeProgramSelectionAction(navigatable, tableServicePlugin.getName(), table);
 		}
 		else {
-			selectAction =
-				new MakeProgramSelectionAction(tableServicePlugin, table);
+			selectAction = new MakeProgramSelectionAction(tableServicePlugin, table);
 		}
 
 		selectAction.setHelpLocation(new HelpLocation(HelpTopics.SEARCH, "Make_Selection"));
@@ -169,7 +174,7 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 		selectionNavigationAction
 				.setHelpLocation(new HelpLocation(HelpTopics.SEARCH, "Selection_Navigation"));
 
-		DockingAction externalGotoAction = new DockingAction("Go to External Location", getName()) {
+		externalGotoAction = new DockingAction("Go to External Location", getName()) {
 			@Override
 			public void actionPerformed(ActionContext context) {
 				gotoExternalAddress(getSelectedExternalAddress());
@@ -202,9 +207,21 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 			new MenuData(new String[] { "GoTo External Location" }, icon, null));
 		externalGotoAction.setHelpLocation(new HelpLocation(HelpTopics.SEARCH, "Navigation"));
 
-		plugin.getTool().addLocalAction(this, selectAction);
-		plugin.getTool().addLocalAction(this, selectionNavigationAction);
-		plugin.getTool().addLocalAction(this, externalGotoAction);
+		tool.addLocalAction(this, selectAction);
+		tool.addLocalAction(this, selectionNavigationAction);
+		tool.addLocalAction(this, externalGotoAction);
+	}
+
+	public void removeAllActions() {
+		tool.removeLocalAction(this, externalGotoAction);
+		tool.removeLocalAction(this, selectAction);
+		tool.removeLocalAction(this, selectionNavigationAction);
+
+		// this action is conditionally added
+		if (removeItemsAction != null) {
+			tool.removeAction(removeItemsAction);
+			removeItemsAction = null;
+		}
 	}
 
 	public void installRemoveItemsAction() {
@@ -294,6 +311,8 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 
 	@Override
 	public void closeComponent() {
+		this.closedCallback.call();
+
 		if (navigatable != null) {
 			navigatable.removeNavigatableListener(this);
 		}
@@ -309,7 +328,7 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 		tableFilterPanel.dispose();
 	}
 
-	public GThreadedTablePanel<T> getThreadedTablePanel() {
+	public GhidraThreadedTablePanel<T> getThreadedTablePanel() {
 		return threadedPanel;
 	}
 
@@ -365,6 +384,10 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 		return model;
 	}
 
+	public GhidraTable getTable() {
+		return threadedPanel.getTable();
+	}
+
 	private void updateTitle() {
 		setSubTitle(generateSubTitle());
 	}
@@ -405,7 +428,25 @@ public class TableComponentProvider<T> extends ComponentProviderAdapter
 
 	@Override
 	public ActionContext getActionContext(MouseEvent event) {
+		if (contextProvider != null) {
+			return contextProvider.apply(event);
+		}
 		return new DefaultActionContext(this, threadedPanel.getTable());
 	}
 
+	/**
+	 * Sets a function that provides context for this component provider.
+	 * @param contextProvider a function that provides context for this component provider.
+	 */
+	public void setActionContextProvider(Function<MouseEvent, ActionContext> contextProvider) {
+		this.contextProvider = contextProvider;
+	}
+
+	/**
+	 * Sets a listener to know when this provider is closed.
+	 * @param c the callback
+	 */
+	public void setClosedCallback(Callback c) {
+		this.closedCallback = Dummy.ifNull(c);
+	}
 }

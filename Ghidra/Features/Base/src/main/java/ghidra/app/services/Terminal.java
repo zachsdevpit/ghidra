@@ -55,10 +55,29 @@ public interface Terminal extends AutoCloseable {
 
 	/**
 	 * @see #injectDisplayOutput(ByteBuffer)
+	 * 
+	 * @param arr the array of bytes to inject
 	 */
 	default void injectDisplayOutput(byte[] arr) {
 		injectDisplayOutput(ByteBuffer.wrap(arr));
 	}
+
+	/**
+	 * Set the pane's sub title
+	 * 
+	 * <p>
+	 * The application may also set this sub title using an escape sequence.
+	 * 
+	 * @param title the new sub title
+	 */
+	void setSubTitle(String title);
+
+	/**
+	 * Get the pane's current sub title
+	 * 
+	 * @return the sub title
+	 */
+	String getSubTitle();
 
 	/**
 	 * Set the terminal size to the given dimensions, and do <em>not</em> resize it to the window.
@@ -70,6 +89,9 @@ public interface Terminal extends AutoCloseable {
 
 	/**
 	 * @see #setFixedSize(short, short)
+	 * 
+	 * @param cols the number of columns
+	 * @param rows the number of rows
 	 */
 	default void setFixedSize(int cols, int rows) {
 		setFixedSize((short) cols, (short) rows);
@@ -85,6 +107,8 @@ public interface Terminal extends AutoCloseable {
 	 * 
 	 * <p>
 	 * This only affects the primary buffer. The alternate buffer has no scroll-back.
+	 * 
+	 * @param rows the number of scroll-back rows
 	 */
 	void setMaxScrollBackRows(int rows);
 
@@ -170,4 +194,32 @@ public interface Terminal extends AutoCloseable {
 
 	@Override
 	void close();
+
+	/**
+	 * Notify the terminal that its session has terminated
+	 * 
+	 * <p>
+	 * The title and sub title are adjust and all listeners are removed. If/when the terminal is
+	 * closed, it is permanently removed from the tool.
+	 */
+	void terminated();
+
+	/**
+	 * Allow the user to terminate the session forcefully
+	 * 
+	 * @param action the action to terminate the session, or null to remove the action
+	 */
+	void setTerminateAction(Runnable action);
+
+	/**
+	 * Check whether the terminal is terminated or active
+	 * 
+	 * @return true for terminated, false for active
+	 */
+	boolean isTerminated();
+
+	/**
+	 * Bring the terminal to the front of the UI
+	 */
+	void toFront();
 }

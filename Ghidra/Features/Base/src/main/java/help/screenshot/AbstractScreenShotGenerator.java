@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -71,16 +71,18 @@ import ghidra.framework.plugintool.Plugin;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.framework.plugintool.util.PluginException;
 import ghidra.program.database.data.ProgramDataTypeManager;
-import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.address.*;
 import ghidra.program.model.data.BuiltInDataTypeManager;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.mem.Memory;
 import ghidra.program.util.ProgramSelection;
 import ghidra.test.AbstractGhidraHeadedIntegrationTest;
 import ghidra.test.TestEnv;
 import ghidra.util.ColorUtils;
 import ghidra.util.exception.AssertException;
+import ghidra.util.exception.UsrException;
+import ghidra.util.task.TaskMonitor;
 import resources.ResourceManager;
 
 public abstract class AbstractScreenShotGenerator extends AbstractGhidraHeadedIntegrationTest {
@@ -111,7 +113,7 @@ public abstract class AbstractScreenShotGenerator extends AbstractGhidraHeadedIn
 		setInstanceField("allowTestTools", ToolUtils.class, Boolean.FALSE);
 		setDockIcon();
 
-		ThemeManager.getInstance().setTheme(new FlatLightTheme());
+		runSwing(() -> ThemeManager.getInstance().setTheme(new FlatLightTheme()));
 	}
 
 	protected TestEnv newTestEnv() throws Exception {
@@ -161,6 +163,19 @@ public abstract class AbstractScreenShotGenerator extends AbstractGhidraHeadedIn
 	public Program loadProgram(final String programName) {
 		runSwing(() -> {
 			program = env.getProgram(programName);
+
+			try {
+				program.withTransaction("Add OTHER Overlay Space", () -> {
+					Memory memory = program.getMemory();
+					memory.createInitializedBlock("OtherOv1",
+						AddressSpace.OTHER_SPACE.getAddress(0), 100, (byte) 0, TaskMonitor.DUMMY,
+						true);
+				});
+			}
+			catch (UsrException e) {
+				failWithException("Unexpected", e);
+			}
+
 			ProgramManager pm = tool.getService(ProgramManager.class);
 			pm.openProgram(program.getDomainFile());
 		});
@@ -222,6 +237,7 @@ public abstract class AbstractScreenShotGenerator extends AbstractGhidraHeadedIn
 	public void performAction(String actionName, String owner, ComponentProvider contextProvider,
 			boolean wait) {
 		DockingActionIf action = getAction(tool, owner, actionName);
+		assertNotNull("Could not find action: " + actionName + " for owner " + owner, action);
 		performAction(action, contextProvider, wait);
 	}
 
@@ -1637,7 +1653,7 @@ public abstract class AbstractScreenShotGenerator extends AbstractGhidraHeadedIn
 
 		g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-		g2.setColor(Colors.BORDER);
+		g2.setColor(Color.BLACK);
 		g2.setStroke(new BasicStroke(3f));
 		g2.draw(topPath);
 		g2.draw(bottomPath);

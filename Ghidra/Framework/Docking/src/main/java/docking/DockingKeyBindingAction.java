@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,10 +30,9 @@ import docking.actions.KeyBindingUtils;
  */
 public abstract class DockingKeyBindingAction extends AbstractAction {
 
-	private DockingActionIf dockingAction;
-
-	protected final KeyStroke keyStroke;
-	protected final Tool tool;
+	protected Tool tool;
+	protected DockingActionIf dockingAction;
+	protected KeyStroke keyStroke;
 
 	public DockingKeyBindingAction(Tool tool, DockingActionIf action, KeyStroke keyStroke) {
 		super(KeyBindingUtils.parseKeyStroke(keyStroke));
@@ -42,19 +41,14 @@ public abstract class DockingKeyBindingAction extends AbstractAction {
 		this.keyStroke = keyStroke;
 	}
 
-	KeyStroke getKeyStroke() {
-		return keyStroke;
-	}
-
 	@Override
 	public boolean isEnabled() {
-		// always enable; this is a reserved binding and cannot be disabled
-		return true;
+		return true; // always enable; this is a internal action that cannot be disabled
 	}
 
 	public abstract KeyBindingPrecedence getKeyBindingPrecedence();
 
-	public boolean isReservedKeybindingPrecedence() {
+	public boolean isSystemKeybindingPrecedence() {
 		return false;
 	}
 
@@ -65,6 +59,10 @@ public abstract class DockingKeyBindingAction extends AbstractAction {
 		ActionContext context = getLocalContext(provider);
 		context.setSourceObject(e.getSource());
 		dockingAction.actionPerformed(context);
+	}
+
+	public List<DockingActionIf> getValidActions(Object source) {
+		return getActions(); // the action for this class is always enabled and valid
 	}
 
 	protected ActionContext getLocalContext(ComponentProvider localProvider) {

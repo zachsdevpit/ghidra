@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
- *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,6 +51,7 @@ import ghidra.util.datastruct.FixedSizeHashMap;
 import ghidra.util.exception.DuplicateNameException;
 import utilities.util.ProxyUtilities;
 
+@Deprecated(forRemoval = true, since = "11.2")
 public class GadpClient extends AbstractDebuggerObjectModel
 		implements ProxyFactory<List<Class<? extends TargetObject>>> {
 
@@ -323,10 +324,10 @@ public class GadpClient extends AbstractDebuggerObjectModel
 	protected void channelStateChanged(ChannelState old, ChannelState set,
 			DebuggerModelClosedReason reason) {
 		if (old == ChannelState.NEGOTIATING && set == ChannelState.ACTIVE) {
-			listeners.fire.modelOpened();
+			broadcast().modelOpened();
 		}
 		else if (old == ChannelState.ACTIVE && set == ChannelState.CLOSED) {
-			listeners.fire.modelClosed(reason);
+			broadcast().modelClosed(reason);
 			root.invalidateSubtree(root, "GADP Client disconnected");
 			messageMatcher.flush(new DebuggerModelTerminatingException("GADP Client disconnected"));
 		}
@@ -504,7 +505,7 @@ public class GadpClient extends AbstractDebuggerObjectModel
 		}
 		catch (RejectedExecutionException e) {
 			reportError(this, "Client already closed", e);
-			return AsyncUtils.NIL;
+			return AsyncUtils.nil();
 		}
 		catch (IOException e) {
 			return CompletableFuture.failedFuture(e);

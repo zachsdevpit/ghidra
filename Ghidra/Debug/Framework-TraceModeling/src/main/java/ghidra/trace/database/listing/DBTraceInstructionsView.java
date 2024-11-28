@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,7 @@
 package ghidra.trace.database.listing;
 
 import java.util.*;
+import java.util.Map.Entry;
 
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -29,12 +30,14 @@ import ghidra.program.model.util.CodeUnitInsertionException;
 import ghidra.trace.database.context.DBTraceRegisterContextManager;
 import ghidra.trace.database.context.DBTraceRegisterContextSpace;
 import ghidra.trace.database.guest.InternalTracePlatform;
+import ghidra.trace.database.memory.DBTraceMemoryManager;
+import ghidra.trace.database.memory.DBTraceMemorySpace;
 import ghidra.trace.model.*;
-import ghidra.trace.model.Trace.TraceCodeChangeType;
 import ghidra.trace.model.guest.TracePlatform;
 import ghidra.trace.model.listing.*;
-import ghidra.trace.util.OverlappingObjectIterator;
-import ghidra.trace.util.TraceChangeRecord;
+import ghidra.trace.model.memory.TraceMemoryOperations;
+import ghidra.trace.model.memory.TraceMemoryState;
+import ghidra.trace.util.*;
 import ghidra.util.LockHold;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
@@ -94,7 +97,7 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 
 		protected void truncateOrDelete(TraceInstruction exists) {
 			if (exists.getStartSnap() < lifespan.lmin()) {
-				exists.setEndSnap(lifespan.lmin());
+				exists.setEndSnap(lifespan.lmin() - 1);
 			}
 			else {
 				exists.delete();
@@ -343,14 +346,15 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 	 * @param platform the platform (language, compiler) for the instruction
 	 * @param prototype the instruction's prototype
 	 * @param context the initial context for parsing the instruction
-	 * @param length instruction byte-length (must be in the range 0..prototype.getLength()).
-	 * If smaller than the prototype length it must have a value no greater than 7, otherwise
-	 * an error will be thrown.  A value of 0 or greater-than-or-equal the prototype length
-	 * will be ignored and not impose and override length.  The length value must be a multiple 
-	 * of the {@link Language#getInstructionAlignment() instruction alignment} .
-	 * @return the newly created instruction.  
-	 * @throws CodeUnitInsertionException thrown if the new Instruction would overlap and 
-	 * existing {@link CodeUnit} or the specified {@code length} is unsupported.
+	 * @param length instruction byte-length (must be in the range 0..prototype.getLength()). If
+	 *            smaller than the prototype length it must have a value no greater than 7,
+	 *            otherwise an error will be thrown. A value of 0 or greater-than-or-equal the
+	 *            prototype length will be ignored and not impose and override length. The length
+	 *            value must be a multiple of the {@link Language#getInstructionAlignment()
+	 *            instruction alignment} .
+	 * @return the newly created instruction.
+	 * @throws CodeUnitInsertionException thrown if the new Instruction would overlap and existing
+	 *             {@link CodeUnit} or the specified {@code length} is unsupported.
 	 * @throws IllegalArgumentException if a negative {@code length} is specified.
 	 * @throws AddressOverflowException if the instruction would fall off the address space
 	 */
@@ -403,7 +407,7 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 			DBTraceInstruction created =
 				doCreate(lifespan, address, dbPlatform, prototype, context, forcedLengthOverride);
 			space.trace.setChanged(
-				new TraceChangeRecord<>(TraceCodeChangeType.ADDED, space, created, created));
+				new TraceChangeRecord<>(TraceEvents.CODE_ADDED, space, created, created));
 			return created;
 		}
 		catch (AddressOverflowException e) {
@@ -472,6 +476,15 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 			conflict, conflictCodeUnit, overwrite);
 	}
 
+	protected boolean isKnown(DBTraceMemorySpace ms, long snap, CodeUnit cu) {
+		if (ms == null) {
+			return false;
+		}
+		AddressRange range = new AddressRangeImpl(cu.getMinAddress(), cu.getMaxAddress());
+		var states = ms.getStates(snap, range);
+		return TraceMemoryOperations.isStateEntirely(range, states, TraceMemoryState.KNOWN);
+	}
+
 	/**
 	 * Checks the intended locations for conflicts with existing units.
 	 * 
@@ -487,6 +500,7 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 			Set<Address> skipDelaySlots) {
 		// NOTE: Partly derived from CodeManager#checkInstructionSet()
 		// Attempted to factor more fluently
+		DBTraceMemoryManager mm = space.trace.getMemoryManager();
 		for (InstructionBlock block : instructionSet) {
 			// If block contains a known error, record its address, and do not proceed beyond it
 			Address errorAddress = null;
@@ -520,6 +534,12 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 					lastProtoInstr = protoInstr;
 				}
 				CodeUnit existsCu = overlap.getRight();
+				DBTraceMemorySpace ms =
+					mm.getMemorySpace(existsCu.getAddress().getAddressSpace(), false);
+				if (!isKnown(ms, startSnap, existsCu) && existsCu instanceof TraceCodeUnit tcu) {
+					tcu.delete();
+					continue;
+				}
 				int cmp = existsCu.getMinAddress().compareTo(protoInstr.getMinAddress());
 				boolean existsIsInstruction = (existsCu instanceof TraceInstruction);
 				if (cmp == 0 && existsIsInstruction) {
@@ -553,7 +573,7 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 				}
 				// NOTE: existsIsInstruction implies cmp != 0, so record as off-cut conflict
 				block.setCodeUnitConflict(existsCu.getAddress(), protoInstr.getAddress(),
-					flowFromAddress, existsIsInstruction, existsIsInstruction);
+					flowFromAddress, existsIsInstruction, true);
 			}
 		}
 	}
@@ -584,7 +604,7 @@ public class DBTraceInstructionsView extends AbstractBaseDBTraceDefinedUnitsView
 				if (lastInstruction != null) {
 					Address maxAddress = DBTraceCodeManager.instructionMax(lastInstruction, true);
 					result.addRange(block.getStartAddress(), maxAddress);
-					space.trace.setChanged(new TraceChangeRecord<>(TraceCodeChangeType.ADDED, space,
+					space.trace.setChanged(new TraceChangeRecord<>(TraceEvents.CODE_ADDED, space,
 						new ImmutableTraceAddressSnapRange(block.getStartAddress(), maxAddress,
 							lifespan)));
 				}

@@ -1,26 +1,28 @@
 ## ###
-#  IP: GHIDRA
-# 
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
-#  
-#       http://www.apache.org/licenses/LICENSE-2.0
-#  
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
+# IP: GHIDRA
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 ##
 from ghidratrace.client import Address, RegVal
 
 import gdb
 
 # NOTE: This map is derived from the ldefs using a script
+# i386 is hand-patched
 language_map = {
     'aarch64': ['AARCH64:BE:64:v8A', 'AARCH64:LE:64:AppleSilicon', 'AARCH64:LE:64:v8A'],
     'aarch64:ilp32': ['AARCH64:BE:32:ilp32', 'AARCH64:LE:32:ilp32', 'AARCH64:LE:64:AppleSilicon'],
+    'arm': ['ARM:BE:32:v8', 'ARM:BE:32:v8T', 'ARM:LE:32:v8', 'ARM:LE:32:v8T'],
     'arm_any': ['ARM:BE:32:v8', 'ARM:BE:32:v8T', 'ARM:LE:32:v8', 'ARM:LE:32:v8T'],
     'armv2': ['ARM:BE:32:v4', 'ARM:LE:32:v4'],
     'armv2a': ['ARM:BE:32:v4', 'ARM:LE:32:v4'],
@@ -48,6 +50,7 @@ language_map = {
     'avr:51': ['avr8:LE:16:atmega256'],
     'avr:6': ['avr8:LE:16:atmega256'],
     'hppa2.0w': ['pa-risc:BE:32:default'],
+    'i386': ['x86:LE:32:default'],
     'i386:intel': ['x86:LE:32:default'],
     'i386:x86-64': ['x86:LE:64:default'],
     'i386:x86-64:intel': ['x86:LE:64:default'],
@@ -58,6 +61,7 @@ language_map = {
     'm68k:68020': ['68000:BE:32:MC68020'],
     'm68k:68030': ['68000:BE:32:MC68030'],
     'm9s12x': ['HCS-12:BE:24:default', 'HCS-12X:BE:24:default'],
+    'mips:3000': ['MIPS:BE:32:default', 'MIPS:LE:32:default'],
     'mips:4000': ['MIPS:BE:32:default', 'MIPS:LE:32:default'],
     'mips:5000': ['MIPS:BE:64:64-32addr', 'MIPS:BE:64:default', 'MIPS:LE:64:64-32addr', 'MIPS:LE:64:default'],
     'mips:micromips': ['MIPS:BE:32:micro'],
@@ -83,9 +87,9 @@ data64_compiler_map = {
 
 x86_compiler_map = {
     'GNU/Linux': 'gcc',
-    'Windows': 'Visual Studio',
+    'Windows': 'windows',
     # This may seem wrong, but Ghidra cspecs really describe the ABI
-    'Cygwin': 'Visual Studio',
+    'Cygwin': 'windows',
 }
 
 compiler_map = {
@@ -102,7 +106,7 @@ def get_arch():
 
 def get_endian():
     parm = gdb.parameter('endian')
-    if parm != 'auto':
+    if not parm in ['', 'auto', 'default']:
         return parm
     # Once again, we have to hack using the human-readable 'show'
     show = gdb.execute('show endian', to_string=True)
@@ -115,7 +119,7 @@ def get_endian():
 
 def get_osabi():
     parm = gdb.parameter('osabi')
-    if not parm in ['auto', 'default']:
+    if not parm in ['', 'auto', 'default']:
         return parm
     # We have to hack around the fact the GDB won't give us the current OS ABI
     # via the API if it is "auto" or "default". Using "show", we can get it, but
@@ -130,7 +134,7 @@ def get_osabi():
 def compute_ghidra_language():
     # First, check if the parameter is set
     lang = gdb.parameter('ghidra-language')
-    if lang != 'auto':
+    if not lang in ['', 'auto', 'default']:
         return lang
 
     # Get the list of possible languages for the arch. We'll need to sift
@@ -155,18 +159,22 @@ def compute_ghidra_language():
 def compute_ghidra_compiler(lang):
     # First, check if the parameter is set
     comp = gdb.parameter('ghidra-compiler')
-    if comp != 'auto':
+    if not comp in ['', 'auto', 'default']:
         return comp
 
     # Check if the selected lang has specific compiler recommendations
     if not lang in compiler_map:
+        print(f"{lang} not found in compiler map")
         return 'default'
     comp_map = compiler_map[lang]
+    if comp_map == data64_compiler_map:
+        print(f"Using the DATA64 compiler map")
     osabi = get_osabi()
     if osabi in comp_map:
         return comp_map[osabi]
     if None in comp_map:
         return comp_map[None]
+    print(f"{osabi} not found in compiler map")
     return 'default'
 
 
@@ -239,11 +247,18 @@ class DefaultRegisterMapper(object):
                                .format(name, value, value.type))
         return RegVal(self.map_name(inf, name), av)
 
+    def convert_value_back(self, value, size=None):
+        if size is not None:
+            value = value[-size:].rjust(size, b'\0')
+        if self.byte_order == 'little':
+            value = bytes(reversed(value))
+        return value
+
     def map_name_back(self, inf, name):
         return name
 
     def map_value_back(self, inf, name, value):
-        return RegVal(self.map_name_back(inf, name), value)
+        return RegVal(self.map_name_back(inf, name), self.convert_value_back(value))
 
 
 class Intel_x86_64_RegisterMapper(DefaultRegisterMapper):
@@ -268,6 +283,7 @@ class Intel_x86_64_RegisterMapper(DefaultRegisterMapper):
     def map_name_back(self, inf, name):
         if name == 'rflags':
             return 'eflags'
+        return name
 
 
 DEFAULT_BE_REGISTER_MAPPER = DefaultRegisterMapper('big')

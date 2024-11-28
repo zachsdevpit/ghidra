@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,6 +20,7 @@ import java.util.Collection;
 
 import ghidra.docking.settings.Settings;
 import ghidra.docking.settings.SettingsDefinition;
+import ghidra.program.database.data.DataTypeUtilities;
 import ghidra.program.model.mem.MemBuffer;
 import ghidra.program.model.scalar.Scalar;
 import ghidra.util.InvalidNameException;
@@ -50,6 +51,12 @@ public interface DataType {
 	@Deprecated
 	public static final DataType VOID = VoidDataType.dataType;
 
+	/**
+	 * Datatype name conflict suffix.
+	 * 
+	 * See {@link DataTypeUtilities} for various methods related to conflict name handling.
+	 * Direct use of this string in application/user-level code is discouraged.
+	 */
 	public final static String CONFLICT_SUFFIX = ".conflict";
 
 	public final static String TYPEDEF_ATTRIBUTE_PREFIX = "__((";
@@ -391,7 +398,7 @@ public interface DataType {
 	/**
 	 * Returns the prefix to use for this datatype when an abbreviated prefix is desired.
 	 * <p>
-	 * For example, some datatypes will built a large default label, at which is is more desirable
+	 * For example, some datatypes will build a large default label, at which it is more desirable
 	 * to have a shortened prefix.
 	 *
 	 * @return the prefix to use for this datatype when an abbreviated prefix is desired. May return

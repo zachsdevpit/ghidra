@@ -17,8 +17,12 @@ package ghidra.program.util;
 
 import java.util.*;
 
+import javax.help.UnsupportedOperationException;
+
+import ghidra.program.database.data.ProgramBasedDataTypeManagerDB;
 import ghidra.program.database.properties.UnsupportedMapDB;
 import ghidra.program.model.address.*;
+import ghidra.program.model.data.ProgramBasedDataTypeManager;
 import ghidra.program.model.lang.Register;
 import ghidra.program.model.lang.RegisterValue;
 import ghidra.program.model.listing.*;
@@ -644,8 +648,7 @@ public class ProgramDiff {
 				monitorMsg = "Checking Repeatable Comment Differences";
 				monitor.setMessage(monitorMsg);
 				as = getCommentDiffs(CodeUnit.REPEATABLE_COMMENT, addrs,
-					new CommentTypeComparator(CodeUnit.REPEATABLE_COMMENT),
-					monitor);
+					new CommentTypeComparator(CodeUnit.REPEATABLE_COMMENT), monitor);
 				break;
 			case ProgramDiffFilter.PRE_COMMENT_DIFFS:
 				monitorMsg = "Checking Pre-Comment Differences";
@@ -928,8 +931,7 @@ public class ProgramDiff {
 				monitorMsg = "Checking Repeatable Comment Differences";
 				monitor.setMessage(monitorMsg);
 				as = getCommentDiffs(CodeUnit.REPEATABLE_COMMENT, checkAddressSet,
-					new CommentTypeComparator(CodeUnit.REPEATABLE_COMMENT),
-					monitor);
+					new CommentTypeComparator(CodeUnit.REPEATABLE_COMMENT), monitor);
 				break;
 			case ProgramDiffFilter.PRE_COMMENT_DIFFS:
 				monitorMsg = "Checking Pre-Comment Differences";
@@ -1417,17 +1419,16 @@ public class ProgramDiff {
 	 */
 	private AddressSet getLabelDifferences(AddressSetView addressSet, TaskMonitor monitor)
 			throws CancelledException {
-		SymbolIterator iter1;
-		SymbolIterator iter2;
+
 		if (addressSet == null) {
-			iter1 = program1.getSymbolTable().getPrimarySymbolIterator(true);
-			iter2 = program2.getSymbolTable().getPrimarySymbolIterator(true);
+			addressSet = program1.getMemory();
 		}
-		else {
-			iter1 = program1.getSymbolTable().getPrimarySymbolIterator(addressSet, true);
-			AddressSet addressSet2 = DiffUtility.getCompatibleAddressSet(addressSet, program2);
-			iter2 = program2.getSymbolTable().getPrimarySymbolIterator(addressSet2, true);
-		}
+
+		SymbolIterator iter1 = program1.getSymbolTable().getPrimarySymbolIterator(addressSet, true);
+		AddressSetView addressSet2 = DiffUtility.getCompatibleAddressSet(addressSet, program2);
+		SymbolIterator iter2 =
+			program2.getSymbolTable().getPrimarySymbolIterator(addressSet2, true);
+
 		SymbolComparator c = new SymbolComparator();
 		return c.getObjectDiffs(iter1, iter2, monitor);
 	}
@@ -1534,17 +1535,15 @@ public class ProgramDiff {
 	 */
 	private AddressSet getFunctionDifferences(AddressSetView addressSet, TaskMonitor monitor)
 			throws CancelledException {
-		FunctionIterator iter1;
-		FunctionIterator iter2;
+
 		if (addressSet == null) {
-			iter1 = program1.getListing().getFunctions(true);
-			iter2 = program2.getListing().getFunctions(true);
+			addressSet = program1.getMemory();
 		}
-		else {
-			iter1 = program1.getListing().getFunctions(addressSet, true);
-			AddressSet addressSet2 = DiffUtility.getCompatibleAddressSet(addressSet, program2);
-			iter2 = program2.getListing().getFunctions(addressSet2, true);
-		}
+
+		FunctionIterator iter1 = program1.getListing().getFunctions(addressSet, true);
+		AddressSetView addressSet2 = DiffUtility.getCompatibleAddressSet(addressSet, program2);
+		FunctionIterator iter2 = program2.getListing().getFunctions(addressSet2, true);
+
 		FunctionComparator c = new FunctionComparator();
 		return c.getObjectDiffs(iter1, iter2, monitor);
 	}
@@ -1588,8 +1587,7 @@ public class ProgramDiff {
 	 * @see ghidra.program.model.listing.CodeUnit
 	 */
 	private AddressSet getCuiDiffs(String cuiType, AddressSetView addressSet,
-			CodeUnitComparator<CodeUnit> c,
-			TaskMonitor monitor) throws CancelledException {
+			CodeUnitComparator<CodeUnit> c, TaskMonitor monitor) throws CancelledException {
 		CodeUnitIterator iter1 = listing1.getCodeUnitIterator(cuiType, addressSet, true);
 		AddressSet addressSet2 = DiffUtility.getCompatibleAddressSet(addressSet, program2);
 		CodeUnitIterator iter2 = listing2.getCodeUnitIterator(cuiType, addressSet2, true);
@@ -2682,8 +2680,9 @@ public class ProgramDiff {
 				return false;
 			}
 		}
-		Symbol p1Symbol = p2ToP1Translator.getDestinationProgram().getSymbolTable().getSymbol(
-			p1Ref.getSymbolID());
+		Symbol p1Symbol = p2ToP1Translator.getDestinationProgram()
+				.getSymbolTable()
+				.getSymbol(p1Ref.getSymbolID());
 		Symbol p2Symbol =
 			p2ToP1Translator.getSourceProgram().getSymbolTable().getSymbol(p2Ref.getSymbolID());
 		if (!ProgramDiff.equivalentSymbols(p2ToP1Translator, p1Symbol, p2Symbol)) {
@@ -2969,6 +2968,30 @@ public class ProgramDiff {
 			// Detect that data type name or path differs?
 			if (!dt1.getPathName().equals(dt2.getPathName())) {
 				return false;
+			}
+
+			// assume only top-level data code units are compared
+			// we should not be a DataComponent (i.e., no parent)
+			if (d1.getParent() != null || d2.getParent() != null) {
+				throw new UnsupportedOperationException("Expecting top-level Data only");
+			}
+
+			// Only top-level Data instance Settings are supported 
+
+			String[] settingNames1 = d1.getNames();
+			Arrays.sort(settingNames1);
+			String[] settingNames2 = d2.getNames();
+			Arrays.sort(settingNames2);
+			if (!Arrays.equals(settingNames1, settingNames2)) {
+				return false;
+			}
+
+			for (int i = 0; i < settingNames1.length; i++) {
+				Object v1 = d1.getValue(settingNames1[i]);
+				Object v2 = d2.getValue(settingNames2[i]);
+				if (!Objects.equals(v1, v2)) {
+					return false;
+				}
 			}
 
 			return true;
